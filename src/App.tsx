@@ -1,132 +1,230 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
+import type { KeyboardEvent } from 'react'
+import './App.css'
 
-// 1. Paste your Lambda Function URL here (ends in .lambda-url.<region>.on.aws/)
-//    You can also put it in a .env file as VITE_LAMBDA_URL and it will be used automatically.
-const LAMBDA_URL =
-  import.meta.env.VITE_LAMBDA_URL ||
-  'https://YOUR-FUNCTION-URL.lambda-url.us-east-1.on.aws/'
+const LAMBDA_URL = import.meta.env.VITE_LAMBDA_URL ?? ''
 
-const FALLBACK = 'Start small, but start today.'
+const FALLBACKS = [
+  'Start small, but start today.',
+  'Done is better than perfect — begin the first line.',
+  'One task at a time. That is the whole trick.',
+  'Progress lives in action, not intention.',
+  'Do it imperfectly, but do it now.',
+]
 
 function App() {
+  const [task, setTask] = useState('')
+  const [answered, setAnswered] = useState('')
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [offline, setOffline] = useState(false)
+  const [edition, setEdition] = useState(0)
 
   const date = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
-    day: 'numeric',
+    day: '2-digit',
     month: 'long',
     year: 'numeric',
   })
 
-  const generate = useCallback(async () => {
+  async function generate(e?: { preventDefault: () => void }) {
+    e?.preventDefault()
+    const t = task.trim()
+    if (!t || loading) return
+
     setLoading(true)
-    setError('')
     try {
-      const res = await fetch(LAMBDA_URL, { method: 'GET' })
+      if (!LAMBDA_URL) throw new Error('no lambda configured')
+      const res = await fetch(LAMBDA_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: t }),
+      })
       if (!res.ok) throw new Error('HTTP ' + res.status)
       const data = await res.json()
-      setMessage(data.message || FALLBACK)
-    } catch (e) {
-      setError('Could not reach the Lambda.')
-      setMessage(FALLBACK)
+      setMessage(data.message?.trim() || pickFallback())
+      setOffline(false)
+    } catch {
+      setMessage(pickFallback())
+      setOffline(true)
     } finally {
+      setAnswered(t)
       setLoading(false)
+      setEdition((n) => n + 1)
     }
-  }, [])
+  }
 
-  // Generate the pill when the page loads.
-  useEffect(() => {
-    generate()
-  }, [generate])
+  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      void generate()
+    }
+  }
+
+  const words = message.split(/\s+/).filter(Boolean)
+  const hasQuote = loading || Boolean(message)
 
   return (
-    <main style={styles.page}>
-      <div style={styles.card}>
-        <p style={styles.date}>{date}</p>
-        <h1 style={styles.title}>Daily Pill</h1>
+    <div className="paper">
+      <div className="grain" aria-hidden="true" />
 
-        <div style={styles.quoteBox}>
-          <span style={styles.label}>Your dose for today</span>
-          <p style={{ ...styles.quote, opacity: loading ? 0.5 : 1 }}>
-            {loading ? 'Generating your message...' : message}
-          </p>
+      <main className="sheet">
+        <header className="masthead">
+          <div className="brand">
+            <Spark />
+            <span className="brand-name">Momentum</span>
+          </div>
+          <p className="tagline">A daily ritual for deep work</p>
+          <time className="date">{date}</time>
+        </header>
+
+        <div className="rule" aria-hidden="true">
+          <span>No. {String(edition).padStart(3, '0')}</span>
+          <span>{offline ? 'Local edition' : 'On demand'}</span>
         </div>
 
-        <button
-          type="button"
-          style={{ ...styles.btn, opacity: loading ? 0.6 : 1 }}
-          onClick={generate}
-          disabled={loading}
-        >
-          {loading ? '...' : 'New pill'}
-        </button>
+        <section className="stage">
+          <span className="kicker" aria-hidden="true">
+            <em>“</em> Your dose of focus
+          </span>
 
-        {error && <p style={styles.error}>{error}</p>}
-      </div>
-    </main>
+          {hasQuote ? (
+            <blockquote
+              key={edition}
+              className={loading ? 'quote is-loading' : 'quote'}
+              aria-live="polite"
+            >
+              {loading ? (
+                <span className="skeleton" aria-hidden="true">
+                  <i /> <i /> <i /> <i /> <i /> <i />
+                </span>
+              ) : (
+                words.map((word, i) => (
+                  <span
+                    className="w"
+                    key={`${edition}-${i}`}
+                    style={{ animationDelay: `${i * 45}ms` }}
+                  >
+                    {word}
+                  </span>
+                ))
+              )}
+            </blockquote>
+          ) : (
+            <p className="prompt-empty">
+              Tell me what you must do, and I'll hand you the push to start.
+            </p>
+          )}
+
+          {answered && !loading && (
+            <p className="re-task" aria-hidden="true">
+              Re:&nbsp;<span>{answered}</span>
+            </p>
+          )}
+
+          <Seal edition={edition} />
+        </section>
+
+        <footer className="deck">
+          <form className="composer" onSubmit={(e) => void generate(e)}>
+            <label className="composer-label" htmlFor="task">
+              What do you have to do?
+            </label>
+            <div className="composer-row">
+              <textarea
+                id="task"
+                className="composer-input"
+                value={task}
+                onChange={(e) => setTask(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder="e.g. finish the quarterly report"
+                rows={2}
+                maxLength={300}
+              />
+              <button
+                type="submit"
+                className="draw"
+                disabled={loading || !task.trim()}
+              >
+                <span className="draw-label">
+                  {loading ? 'Pouring…' : 'Get momentum'}
+                </span>
+                <Arrow />
+              </button>
+            </div>
+            <p className="hint">
+              {offline
+                ? 'No connection to the server — showing a local line.'
+                : 'Write one task. Press Get momentum. Then begin the block.'}
+            </p>
+          </form>
+        </footer>
+      </main>
+    </div>
   )
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: '#0f0f1a',
-    padding: 20,
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  },
-  card: {
-    width: '100%',
-    maxWidth: 480,
-    background: '#1a1a2e',
-    borderRadius: 24,
-    padding: '36px 30px',
-    boxShadow: '0 20px 50px rgba(0,0,0,.4)',
-    textAlign: 'center',
-    color: '#fff',
-  },
-  date: {
-    textTransform: 'capitalize',
-    color: '#9ca3af',
-    fontSize: 14,
-    margin: 0,
-  },
-  title: { fontSize: 26, margin: '6px 0 26px' },
-  quoteBox: {
-    background: 'linear-gradient(135deg,#4f46e5,#7c3aed)',
-    borderRadius: 18,
-    padding: '30px 24px',
-    minHeight: 150,
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-  },
-  label: {
-    fontSize: 11,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    opacity: 0.8,
-    marginBottom: 12,
-  },
-  quote: { fontSize: 22, lineHeight: 1.4, fontWeight: 600, margin: 0 },
-  btn: {
-    marginTop: 22,
-    width: '100%',
-    border: 'none',
-    borderRadius: 12,
-    padding: '14px 20px',
-    fontSize: 15,
-    fontWeight: 600,
-    color: '#fff',
-    background: '#7c3aed',
-    cursor: 'pointer',
-  },
-  error: { color: '#f87171', fontSize: 13, marginTop: 14 },
+function pickFallback() {
+  return FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)]
+}
+
+function Spark() {
+  return (
+    <svg className="spark" viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+      <path
+        d="M16 2c.9 5.6 3.6 8.3 9.2 9.2C19.6 12.1 16.9 14.8 16 20.4 15.1 14.8 12.4 12.1 6.8 11.2 12.4 10.3 15.1 7.6 16 2Z"
+        fill="var(--vermillion)"
+      />
+      <path
+        d="M25 22c.4 2.7 1.8 4.1 4.5 4.5C26.8 26.9 25.4 28.3 25 31c-.4-2.7-1.8-4.1-4.5-4.5 2.7-.4 4.1-1.8 4.5-4.5Z"
+        fill="var(--blue)"
+      />
+    </svg>
+  )
+}
+
+function Arrow() {
+  return (
+    <svg className="arrow" viewBox="0 0 40 16" width="40" height="16" aria-hidden="true">
+      <path
+        d="M0 8h36M30 2l7 6-7 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function Seal({ edition }: { edition: number }) {
+  return (
+    <svg className="seal" viewBox="0 0 200 200" aria-hidden="true">
+      <defs>
+        <path
+          id="seal-arc"
+          d="M100,100 m-74,0 a74,74 0 1,1 148,0 a74,74 0 1,1 -148,0"
+        />
+      </defs>
+      <circle cx="100" cy="100" r="92" fill="none" stroke="var(--ink)" strokeWidth="1.5" />
+      <circle cx="100" cy="100" r="60" fill="none" stroke="var(--ink)" strokeWidth="1.5" />
+      <text className="seal-text">
+        <textPath href="#seal-arc" startOffset="0">
+          · DO IT TODAY · NO EXCUSES · ONE BLOCK AT A TIME&nbsp;
+        </textPath>
+      </text>
+      <g className="seal-core">
+        <path
+          d="M100 74c1.4 8.7 5.6 12.9 14.3 14.3C105.6 89.7 101.4 93.9 100 102.6 98.6 93.9 94.4 89.7 85.7 88.3 94.4 86.9 98.6 82.7 100 74Z"
+          fill="var(--vermillion)"
+        />
+        <text x="100" y="120" className="seal-num">
+          {String(edition).padStart(3, '0')}
+        </text>
+      </g>
+    </svg>
+  )
 }
 
 export default App
